@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <sys/time.h>
 
-#define GPIO_BUTTON GPIO_NUM_12
+#define GPIO_BUTTON 0
 #define SHORT_TASK_LOOPS_COUNT 2000000u
 #define YIELD_TASK_LOOPS_COUNT 2000000u
 

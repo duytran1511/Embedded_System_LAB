@@ -1,102 +1,84 @@
-#include "driver/gpio.h"
+#include <stdio.h>
 #include "freertos/FreeRTOS.h"
-#include "freertos/queue.h"
 #include "freertos/task.h"
+#include "esp_system.h"
+#include "driver/gpio.h"
+
 #include <inttypes.h>
 #include <stdio.h>
-#include <sys/time.h>
 
-#define GPIO_BUTTON GPIO_NUM_12
-#define SHORT_TASK_LOOPS_COUNT 2000000u
-#define YIELD_TASK_LOOPS_COUNT 2000000u
 
-static uint32_t taskID = -1u;
-static uint32_t taskID_old = -1u;
+#define GPIO_BUTTON 0
 
-// Idle hook
-void vApplicationIdleHook(void)
-{
-    taskID = taskID_old = 0u;
-}
-
-void print_task_information(void)
-{
-    if (taskID != taskID_old)
-    {
-        taskID_old = taskID;
-        printf("Tick: %04lu, ID: %lu\n", xTaskGetTickCount(), taskID);
-    }
-}
-
-static TaskHandle_t yieldTask01_handle = NULL;
-static TaskHandle_t yieldTask02_handle = NULL;
-static TaskHandle_t yieldTask03_handle = NULL;
-static TaskHandle_t yieldTask04_handle = NULL;
+static TaskHandle_t contTask01_handle = NULL;
+static TaskHandle_t contTask02_handle = NULL;
+static TaskHandle_t eventTask03_handle = NULL;
 
 void IRAM_ATTR button_press_handler(void* arg)
 {
-    xTaskResumeFromISR(yieldTask01_handle);
-    xTaskResumeFromISR(yieldTask02_handle);
-    xTaskResumeFromISR(yieldTask03_handle);
-    xTaskResumeFromISR(yieldTask04_handle);
+    xTaskResumeFromISR(eventTask03_handle);
 }
 
-void initializeGPIO(void)
+void init_gpio_and_interrupt(void)
 {
     gpio_reset_pin(GPIO_BUTTON);
     gpio_set_direction(GPIO_BUTTON, GPIO_MODE_INPUT);
 
     gpio_set_pull_mode(GPIO_BUTTON, GPIO_PULLUP_ONLY);
     gpio_pullup_en(GPIO_BUTTON);
-
+    
     gpio_install_isr_service(ESP_INTR_FLAG_LOWMED);
     gpio_set_intr_type(GPIO_BUTTON, GPIO_INTR_NEGEDGE);
-    gpio_isr_handler_add(GPIO_BUTTON, button_press_handler, NULL);
+    gpio_isr_handler_add(GPIO_BUTTON, button_press_handler, NULL); 
     gpio_intr_enable(GPIO_BUTTON);
 }
 
-// these task run for a while (YIELD_TASK_LOOPS_COUNT) and then yield
-void vTaskWithYield(void *param)
+void print_task_information(uint8_t id)
 {
-    uint32_t taskID = (uint32_t) param;
-    // delay starting the task by taskid * 10 ticks
-    vTaskDelay(10 * taskID);
+    printf("Tick: %04lu, ID: %lu\n", xTaskGetTickCount(), id);
+}
 
+void continuous_processing_task(void *id)
+{
     while (1)
     {
-        for (UBaseType_t i = 0; i < YIELD_TASK_LOOPS_COUNT; i++)
-        {
-            taskID = taskID;
-            print_task_information();
-        }
-
-        if (taskID > 1)
-        {
-            // suspend higher priority task to simulate them going into blocked state
-            // they will be resume on button press
-            vTaskSuspend(NULL);
-        }
-        else
-        {
-            taskYIELD();
-        }
+        print_task_information((uint32_t) id);
     }
 
     vTaskDelete(NULL);
 }
 
+void higher_priority_task(void *id)
+{
+    vTaskSuspend(NULL);
 
-void app_main(void)
+    while (1)
+    {
+        printf("Event task %lu was preempted\n", (uint32_t) id);
+
+        print_task_information(3);
+
+        // go into suspend, the button interrupt will wake this up again
+        printf("Event task %lu was suspended\n", (uint32_t) id);
+
+        vTaskSuspend(NULL);
+    }
+    vTaskDelete(NULL);
+}
+
+void app_main()
 {
     vTaskPrioritySet(NULL, 10);
 
-    initializeGPIO();
+    init_gpio_and_interrupt();
 
-    // four task with yield, increasing priority, id = priority
-    xTaskCreate(vTaskWithYield, "Yielding task #1", 2048, (void*) 1u, 1, &yieldTask01_handle);
-    xTaskCreate(vTaskWithYield, "Yielding task #2", 2048, (void*) 2u, 2, &yieldTask02_handle);
-    xTaskCreate(vTaskWithYield, "Yielding task #3", 2048, (void*) 3u, 3, &yieldTask03_handle);
-    xTaskCreate(vTaskWithYield, "Yielding task #4", 2048, (void*) 4u, 4, &yieldTask04_handle);
-    
+    xTaskCreate(continuous_processing_task, "Continous task #1", 2048,
+        (void*) 1u, 1, &contTask01_handle);
+    xTaskCreate(continuous_processing_task, "Continous task #2", 2048,
+        (void*) 2u, 1, &contTask02_handle);
+
+    // one event task
+    xTaskCreate(higher_priority_task, "Event task #3", 2048, (void*) 3, 2, &eventTask03_handle);
+
     vTaskDelete(NULL);
 }
