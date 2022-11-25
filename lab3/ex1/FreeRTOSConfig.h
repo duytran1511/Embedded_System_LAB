@@ -133,7 +133,7 @@
  * THESE PARAMETERS ARE DESCRIBED WITHIN THE 'CONFIGURATION' SECTION OF THE
  * FreeRTOS API DOCUMENTATION AVAILABLE ON THE FreeRTOS.org WEB SITE.
  *----------------------------------------------------------*/
-#define configUSE_TIME_SLICING                          0
+#define configUSE_TIME_SLICING                          1
 
 #define configUSE_PREEMPTION                            1
 #define configUSE_IDLE_HOOK                             1
