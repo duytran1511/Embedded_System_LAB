@@ -67,7 +67,7 @@ void vRequest()
         // create 3 requests every 5 seconds
 
         // create request randomly from 0 to 3
-        // if request == 3 then error
+        // if request == 3, then error
         bootloader_random_enable();
         request[0] = esp_random() % 4;
         request[1] = esp_random() % 4;
