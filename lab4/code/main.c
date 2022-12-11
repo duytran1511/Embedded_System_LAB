@@ -135,7 +135,7 @@ void vReceptionTask(void)
                 }
 
                 // send data to queue
-                xStatus = xQueueSendToFront(xQueue, &requestedData, xTicksToWait);
+                xStatus = xQueueSendToBack(xQueue, &requestedData, xTicksToWait);
 
                 // check if sending is ok or not
                 if (xStatus == pdPASS)
