@@ -35,11 +35,11 @@ static inline void print_current_time()
     printf("t = %d\t", tv_now.tv_sec);
 }
 
-static void vTimerCallback(TimerHandle_t tim )
+static void vTimerCallback(TimerHandle_t tim)
 {
     uint32_t id = (uint32_t) pvTimerGetTimerID(tim);
 
-    if (id == 0)
+    if (id == 1)
     {
         timer1_reading_time++;
 
@@ -54,7 +54,7 @@ static void vTimerCallback(TimerHandle_t tim )
             }
         }
     }
-    else if (id == 1)
+    else if (id == 2)
     {
         timer2_reading_time++;
 
@@ -82,7 +82,7 @@ void app_main(void)
         "Timer 1",
         pdMS_TO_TICKS(TIMER_1_PERIOD),
         pdTRUE, // Auto reload
-        0,
+        1,
         vTimerCallback);
 
     timer2_reading_time = 0;
@@ -90,7 +90,7 @@ void app_main(void)
         "Timer 2",
         pdMS_TO_TICKS(TIMER_2_PERIOD),
         pdTRUE, // Auto reload
-        1,
+        2,
         vTimerCallback);
 
     if ((timer1 != NULL) && (timer2 != NULL))
