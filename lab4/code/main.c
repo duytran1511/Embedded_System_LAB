@@ -1,248 +1,105 @@
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/timers.h"
 #include "esp_system.h"
 #include "driver/gpio.h"
 
 #include <inttypes.h>
 #include <stdio.h>
 
-#include "freertos/queue.h"
-#include "freertos/semphr.h"
-#include "bootloader_random.h"
-#include "esp_random.h"
+#include "sys/time.h"
 
-// struct data for queue
-typedef struct
+#define TIMER_1_MESSAGE "ahihi"
+#define TIMER_2_MESSAGE "ihaha"
+
+#define TIMER_1_READING_TIME 10
+#define TIMER_2_READING_TIME 5
+
+#define TIMER_1_PERIOD 2000
+#define TIMER_2_PERIOD 3000
+
+TimerHandle_t timer1;
+TimerHandle_t timer2;
+
+BaseType_t xTimer1Started;
+BaseType_t xTimer2Started;
+
+uint8_t timer1_reading_time = 0;
+uint8_t timer2_reading_time = 0;
+
+struct timeval tv_now;
+static inline void print_current_time()
 {
-    uint8_t ID;
-    uint32_t val;
-} Data;
-// this variable hold queue handle
-xQueueHandle xQueue;
-
-// variables and constants for request
-/*
-    0 - get temperature
-    1 - Turn on LED
-    2 - Turn off LED
-    the other - unacceptable request
-*/
-#define GET_TEMP        0
-#define TURN_ON_LED     1
-#define TURN_OFF_LED    2
-
-#define N_REQUEST       3
-uint8_t request[N_REQUEST] = {0, 0, 0};
-// check if there is any request
-bool flagRequest = false;
-
-// create request task
-void vRequest();
-// reception task
-void vReceptionTask(void);
-// functional tasks
-void vGetTemp(void *parameter);
-void vSetLed(void *parameter);
-
-void app_main()
-{
-    /* create the queue which size can contains 5 elements of Data */
-    xQueue = xQueueCreate(5, sizeof(Data));
-
-    xTaskCreate(vRequest, "vRequest", 2048, NULL, 3, NULL);
-
-    xTaskCreate(vReceptionTask, "vReceptionTask1", 2048, NULL, 2, NULL);
-
-    xTaskCreate(vGetTemp, "vGetTemp1", 2048, (uint8_t *)0u, 1, NULL); // task get temp, id = 0
-    xTaskCreate(vSetLed, "vSetLed", 2048, (uint8_t *)1u, 1, NULL);    // task set led, id = 1
+    gettimeofday(&tv_now, NULL);
+    printf("t = %d\t", tv_now.tv_sec);
 }
 
-void vRequest()
+static void vTimerCallback(TimerHandle_t tim )
 {
-    uint8_t i = 0;
+    uint32_t id = (uint32_t) pvTimerGetTimerID(tim);
 
-    while (1)
+    if (id == 0)
     {
-        // create 3 requests every 5 seconds
+        timer1_reading_time++;
 
-        // create request randomly from 0 to 3
-        // if request == 3 then error
-        bootloader_random_enable();
-        request[0] = esp_random() % 4;
-        request[1] = esp_random() % 4;
-        request[2] = esp_random() % 4;
-        bootloader_random_disable();
+        print_current_time();
+        printf("%s\t(%d)\n", TIMER_1_MESSAGE, timer1_reading_time);
 
-        // set flag to notify there is request
-        flagRequest = true;
-
-        vTaskDelay(5000 / portTICK_RATE_MS);
-    }
-
-    vTaskDelete(NULL);
-}
-
-void vReceptionTask(void)
-{
-    /* keep the status of sending data */
-    BaseType_t xStatus;
-    /* time to block the task until the queue has free space */
-    const TickType_t xTicksToWait = pdMS_TO_TICKS(100);
-    /* Data is added to queue*/
-    Data requestedData;
-
-    uint8_t i = 0;
-
-    while (1)
-    {
-        // check if there is any request
-        if (flagRequest)
+        if (timer1_reading_time == TIMER_1_READING_TIME)
         {
-            // classify 3 tasks,
-            // then add data to queue
-            for (i = 0; i < N_REQUEST; i++)
+            if (xTimerStop(tim, 0) == pdFAIL)
             {
-                if (request[i] == GET_TEMP)
-                {
-                    requestedData.ID = 0;
-                    requestedData.val = 0;
-                    printf("Request: get temperature\n");
-                }
-                else if (request[i] == TURN_ON_LED)
-                {
-                    requestedData.ID = 1;
-                    requestedData.val = 1;
-                    printf("Request: Turn on LED\n");
-                }
-                else if (request[i] == TURN_OFF_LED)
-                {
-                    requestedData.ID = 1;
-                    requestedData.val = 0;
-                    printf("Request: Turn off LED\n");
-                }
-                else
-                {
-                    // If no functional task receives the request,
-                    // raise an error
-                    requestedData.ID = request[i];
-                    requestedData.val = 0;
-                    printf("Request %d: Error\n", request[i]);
-
-                    // unset flag, and ignore that request
-                    flagRequest = false;
-                    continue;
-                }
-
-                // send data to queue
-                xStatus = xQueueSendToBack(xQueue, &requestedData, xTicksToWait);
-
-                // check if sending is ok or not
-                if (xStatus == pdPASS)
-                {
-                    ;
-                }
-                else
-                {
-                    printf("Request %d: Could not send data\n", request);
-                }
-            }
-
-            // unset flag
-            flagRequest = false;
-        }
-
-        vTaskDelay(50 / portTICK_RATE_MS);
-    }
-    
-    vTaskDelete(NULL);
-}
-
-void vGetTemp(void *parameter)
-{
-    // keep the status of receiving data
-    BaseType_t xStatus;
-    // time to block the task until data is available
-    const TickType_t xTicksToWait = pdMS_TO_TICKS(100);
-
-    Data data;
-    uint8_t id = (uint8_t)parameter;
-
-    uint32_t temperature = 0;
-
-    while (1)
-    {
-        // Peek data from the queue
-        // to check if the next request is for it
-        xStatus = xQueuePeek(xQueue, &data, xTicksToWait);
-
-        if (xStatus == pdPASS)
-        {
-            // check if request
-            if (data.ID == id)
-            {
-                // get random temperature
-                bootloader_random_enable();
-                temperature = 25 + (esp_random() % 5);
-                bootloader_random_disable();
-
-                // pop data from the queue
-                xStatus = xQueueReceive(xQueue, &data, xTicksToWait);
-
-                if (xStatus == pdPASS)
-                {
-                    printf("Response: %d*C\n", temperature);
-                }
-                else
-                {
-                    printf("Response: Cound not recieve data\n");
-                }
+                printf("Cound not to stop timer 1\n");
             }
         }
-
-        vTaskDelay(50 / portTICK_RATE_MS);
     }
-
-    vTaskDelete(NULL);
-}
-
-void vSetLed(void *parameter)
-{
-    // keep the status of receiving data
-    BaseType_t xStatus;
-    // time to block the task until data is available
-    const TickType_t xTicksToWait = pdMS_TO_TICKS(100);
-
-    Data data;
-    uint8_t id = (uint8_t)parameter;
-
-    while (1)
+    else if (id == 1)
     {
-        // Peek data from the queue
-        // to check if the next request is for it
-        xStatus = xQueuePeek(xQueue, &data, xTicksToWait);
+        timer2_reading_time++;
 
-        if (xStatus == pdPASS)
+        print_current_time();
+        printf("%s\t(%d)\n", TIMER_2_MESSAGE, timer2_reading_time);
+
+        if (timer2_reading_time == TIMER_2_READING_TIME)
         {
-            // check if request
-            if (data.ID == id)
+            if (xTimerStop(tim, 0) == pdFAIL)
             {
-                xStatus = xQueueReceive(xQueue, &data, xTicksToWait);
-
-                // pop data from the queue
-                if (xStatus == pdPASS)
-                {
-                    printf("Response: Set LED to %d\n", data.val);
-                }
-                else
-                {
-                    printf("Response: Cound not recieve data\n");
-                }
+                printf("Cound not to stop timer 2\n");
             }
         }
-
-        vTaskDelay(50 / portTICK_RATE_MS);
     }
+    else
+    {
+        printf("Error: Invalid ID %d\n", id);
+    }
+}
 
-    vTaskDelete(NULL);
+void app_main(void)
+{
+    timer1_reading_time = 0;
+    timer1 = xTimerCreate(
+        "Timer 1",
+        pdMS_TO_TICKS(TIMER_1_PERIOD),
+        pdTRUE, // Auto reload
+        0,
+        vTimerCallback);
+
+    timer2_reading_time = 0;
+    timer2 = xTimerCreate(
+        "Timer 2",
+        pdMS_TO_TICKS(TIMER_2_PERIOD),
+        pdTRUE, // Auto reload
+        1,
+        vTimerCallback);
+
+    if ((timer1 != NULL) && (timer2 != NULL))
+    {
+        xTimer1Started = xTimerStart(timer1, 0);
+        xTimer2Started = xTimerStart(timer2, 0);
+        // if ((xTimer1Started == pdPASS) && (xTimer2Started == pdPASS))
+        // {
+        //     ;
+        // }
+    }
 }
